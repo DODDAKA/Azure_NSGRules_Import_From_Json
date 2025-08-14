@@ -1,0 +1,67 @@
+// Define critical services list (must include at least one service)
+let criticalServices = dynamic(["keycloak", "sqlserver", "apache", "nginx"]);
+// Define services to ignore (can be empty)
+let ignoreServices = dynamic([]);
+ConfigurationChange
+| where ConfigChangeType == "WindowsServices" or ConfigChangeType == "Daemons"
+| where isnotempty(SvcDisplayName) and isnotempty(SvcState)
+// Filter for state changes from Running to Stopped
+| where SvcPreviousState == "Running" and SvcState != "Running"
+// Filter for critical services (comment out this line to monitor all services)
+| where SvcDisplayName in~ (criticalServices)
+// Exclude ignored services
+| where SvcDisplayName !in~ (ignoreServices)
+| extend Severity = case(
+    SvcDisplayName in~ (criticalServices), "High",
+    "Medium")
+| project 
+    AlertTime = TimeGenerated,
+    Computer,
+    ServiceName = SvcDisplayName,
+    Severity,
+    PreviousState = SvcPreviousState,
+    CurrentState = SvcState,
+    ServicePath = SvcPath,
+    StartupType = SvcStartupType,
+    ServiceAccount = SvcAccount
+| sort by Severity desc, AlertTime desc
+
+
+
+###############################################
+
+
+ConfigurationChange
+| where SvcDisplayName == "keycloak"
+| where ConfigChangeType == "WindowsServices" or ConfigChangeType == "Daemons"
+| where SvcPreviousState == "Running" and SvcState != "Running"
+| project 
+    DownTime = TimeGenerated, 
+    Computer, 
+    ServiceName = SvcDisplayName, 
+    PreviousState = SvcPreviousState, 
+    CurrentState = SvcState
+| sort by DownTime desc
+
+
+
+###################################################
+
+
+Perf
+| where ObjectName == "LogicalDisk"
+| where CounterName == "% Free Space"
+| where InstanceName  != "HarddiskVolume1" and InstanceName  != "_Total" and InstanceName !contains "HarddiskVolume"
+| summarize arg_max(TimeGenerated, *) by Computer, CounterName, InstanceName
+
+
+\LogicalDisk(*)\% Free Space
+
+
+###############################################
+
+StorageBlobLogs
+| where OperationName == "PutBlob" 
+| where ObjectKey has "/sttfstateazdoprac/customlog"
+| summarize FileCount = count() by bin(TimeGenerated, 15m)
+
